@@ -8,33 +8,71 @@ import {
   Alert,
   Modal,
   TouchableOpacity,
+  TextInput,
+  Platform,
+  KeyboardAvoidingView,
 } from 'react-native';
 import * as Calendar from 'expo-calendar';
+import DateTimePicker, {
+  DateTimePickerEvent,
+  DateTimePickerAndroid,
+} from '@react-native-community/datetimepicker';
 
 const ExpoCalendar: React.FC = () => {
-  const [calendars, setCalendars] = useState<Calendar.Calendar[]>([]);
-  const [writableCalendars, setWritableCalendars] = useState<Calendar.Calendar[]>([]);
+  const [calendars, setCalendars] = useState<Calendar.Calendar[]>([]); // use from expo calendar
+  const [writableCalendars, setWritableCalendars] = useState<Calendar.Calendar[]>([]); 
   const [defaultCalendarId, setDefaultCalendarId] = useState<string | null>(null);
-  const [events, setEvents] = useState<Calendar.Event[]>([]);
-  const [modalVisible, setModalVisible] = useState(false);
+  const [events, setEvents] = useState<Calendar.Event[]>([]); // declare the type of event 
+  const [calendarModalVisible, setCalendarModalVisible] = useState(false);
+  const [eventModalVisible, setEventModalVisible] = useState(false);
 
+  const [title, setTitle] = useState('');
+  const [startDate, setStartDate] = useState(new Date());
+  const [endDate, setEndDate] = useState(new Date());
+  const [location, setLocation] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+
+  
   useEffect(() => {
     (async () => {
-      const granted = await requestCalendarPermissions();
-      if (granted) {
-        const calendarList = await Calendar.getCalendarsAsync();
-        setCalendars(calendarList);
-        const writable = calendarList.filter((cal) => cal.allowsModifications);
-        setWritableCalendars(writable);
+      try {
+        const granted = await requestCalendarPermissions();
+        if (granted) {
+          const calendarList = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+          console.log('All Calendars:', calendarList);
 
-        if (writable.length > 0) {
-          setModalVisible(true); 
+          setCalendars(calendarList);
+
+          const writable = calendarList.filter((cal) => cal.allowsModifications);
+          console.log('Writable Calendars:', writable);
+
+          setWritableCalendars(writable);
+
+          if (writable.length > 0) {
+            setDefaultCalendarId(writable[0].id);
+
+            await getEvents();
+
+            if (writable.length > 1) {
+              setCalendarModalVisible(true);
+            }
+          } else {
+            Alert.alert('No writable calendar', 'No calendar available for writing events.');
+          }
+
         } else {
-          Alert.alert('No writable calendar', 'No calendar available for writing events.');
+          Alert.alert('Permission Denied', 'We need calendar access to proceed.');
         }
+      } catch (error) {
+        console.error('Error fetching calendar data:', error);
+        Alert.alert('Error', 'An error occurred while fetching calendar data.');
       }
     })();
   }, []);
+
 
   const requestCalendarPermissions = async (): Promise<boolean> => {
     const { status } = await Calendar.requestCalendarPermissionsAsync();
@@ -51,21 +89,19 @@ const ExpoCalendar: React.FC = () => {
       return;
     }
 
-    const now = new Date();
-    const end = new Date(now.getTime() + 60 * 60 * 1000); 
-
     const eventDetails = {
-      title: 'Test Event',
-      startDate: now,
-      endDate: end,
+      title: title || 'Untitled Event',
+      startDate,
+      endDate,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      location: 'Online',
-      notes: 'Created by Expo Calendar App',
+      location,
+      notes,
     };
 
     try {
       const eventId = await Calendar.createEventAsync(defaultCalendarId, eventDetails);
       Alert.alert('Success', `Event created with ID: ${eventId}`);
+      setEventModalVisible(false);
       setTimeout(getEvents, 1000);
     } catch (error: any) {
       Alert.alert('Error creating event', error.message);
@@ -79,8 +115,8 @@ const ExpoCalendar: React.FC = () => {
     const oneMonthLater = new Date();
     oneMonthLater.setMonth(now.getMonth() + 1);
 
-    const start = new Date(now.getTime() - 5 * 60 * 1000);
-    const end = new Date(oneMonthLater.getTime() + 5 * 60 * 1000);
+    const start = new Date(now.getTime() - 5 * 60 * 1000); // before 5 minutes
+    const end = new Date(oneMonthLater.getTime() + 5 * 60 * 1000); // after five minutes 
 
     try {
       const fetchedEvents = await Calendar.getEventsAsync([defaultCalendarId], start, end);
@@ -90,11 +126,23 @@ const ExpoCalendar: React.FC = () => {
     }
   };
 
+  const showAndroidDatePicker = (
+    currentDate: Date,
+    onChange: (event: DateTimePickerEvent, selectedDate?: Date) => void
+  ) => {
+    DateTimePickerAndroid.open({
+      value: currentDate,
+      mode: 'datetime',
+      is24Hour: true,
+      onChange,
+    });
+  };
+
   return (
     <ScrollView style={styles.container}>
       <Text style={styles.title}>📆 Expo Calendar Example</Text>
 
-      <Button title="Create Event" onPress={createEvent} />
+      <Button title="Create Event" onPress={() => setEventModalVisible(true)} />
       <Button title="Get Events" onPress={getEvents} />
 
       <Text style={styles.subtitle}>Selected Calendar:</Text>
@@ -103,11 +151,6 @@ const ExpoCalendar: React.FC = () => {
           ? calendars.find((c) => c.id === defaultCalendarId)?.title
           : 'None selected'}
       </Text>
-
-      <Text style={styles.subtitle}>All Calendars:</Text>
-      {calendars.map((cal) => (
-        <Text key={cal.id}>• {cal.title}</Text>
-      ))}
 
       <Text style={styles.subtitle}>Events:</Text>
       {events.length === 0 ? (
@@ -122,7 +165,7 @@ const ExpoCalendar: React.FC = () => {
         ))
       )}
 
-      <Modal visible={modalVisible} animationType="slide" transparent>
+      <Modal visible={calendarModalVisible} animationType="slide" transparent>
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <Text style={styles.subtitle}>Select a Calendar</Text>
@@ -132,13 +175,91 @@ const ExpoCalendar: React.FC = () => {
                 style={styles.calendarOption}
                 onPress={() => {
                   setDefaultCalendarId(cal.id);
-                  setModalVisible(false);
+                  setCalendarModalVisible(false);
+                  setTimeout(getEvents, 500);
                 }}
               >
-                <Text>{cal.title}</Text>
+                <Text style={{color: 'blue'}}>{cal.title} ({cal.source.name})</Text>
               </TouchableOpacity>
             ))}
           </View>
+        </View>
+      </Modal>
+
+      <Modal visible={eventModalVisible} animationType="slide" transparent>
+        <View style={styles.modalContainer}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalContent}
+          >
+            <ScrollView>
+              <Text style={styles.subtitle}>Create New Event</Text>
+              <TextInput placeholder="Event Title" value={title} onChangeText={setTitle} />
+              <TextInput placeholder="Location" value={location} onChangeText={setLocation} />
+              <TextInput placeholder="Notes" value={notes} onChangeText={setNotes} />
+
+              <TouchableOpacity
+                onPress={() => {
+                  if (Platform.OS === 'android') {
+                    showAndroidDatePicker(startDate, (event, date) => {
+                      if (date) setStartDate(date);
+                    });
+                  } else {
+                    setShowStartPicker(true);
+                  }
+                }}
+                style={{ marginVertical: 10 }}
+              >
+                <Text>Start Date: {startDate.toLocaleString()}</Text>
+              </TouchableOpacity>
+
+              {Platform.OS === 'ios' && showStartPicker && (
+                <DateTimePicker
+                  value={startDate}
+                  style={{backgroundColor: 'black'}}
+                  mode="datetime"
+                  display="spinner"
+                  onChange={(e, date) => {
+                    setShowStartPicker(false);
+                    if (date) setStartDate(date);
+                  }}
+                />
+              )}
+
+              <TouchableOpacity
+                onPress={() => {
+                  if (Platform.OS === 'android') {
+                    showAndroidDatePicker(endDate, (event, date) => {
+                      if (date) setEndDate(date);
+                    });
+                  } else {
+                    setShowEndPicker(true);
+                  }
+                }}
+                style={{ marginVertical: 10 }}
+              >
+                <Text>End Date: {endDate.toLocaleString()}</Text>
+              </TouchableOpacity>
+
+              {Platform.OS === 'ios' && showEndPicker && (
+                <DateTimePicker
+                  value={endDate}
+                  style={{backgroundColor: 'pink'}}
+                  mode="datetime"
+                  display="spinner"
+                  onChange={(e, date) => {
+                    setShowEndPicker(false);
+                    if (date) setEndDate(date);
+                  }}
+                />
+              )}
+
+              <View style={{ marginTop: 20 }}>
+                <Button title="Save Event" onPress={createEvent} />
+                <Button title="Cancel" color="red" onPress={() => setEventModalVisible(false)} />
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </ScrollView>
@@ -179,7 +300,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContent: {
-    width: '85%',
+    width: '90%',
+    maxHeight: '80%',
     backgroundColor: '#fff',
     borderRadius: 10,
     padding: 20,
@@ -191,7 +313,3 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eee',
   },
 });
-
-
-
-
